@@ -1,0 +1,89 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "StartCrawler",
+  "States": {
+    "StartCrawler": {
+      "Type": "Task",
+      "Arguments": {
+        "Name": "daily_flights"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+      "Next": "GetCrawler"
+    },
+    "GetCrawler": {
+      "Type": "Task",
+      "Arguments": {
+        "Name": "daily_flights"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:glue:getCrawler",
+      "Next": "Is_crawler_Running",
+      "Output": {
+        "ResultPath": "$.CrawlerResult"
+      }
+    },
+    "Is_crawler_Running": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Next": "Wait",
+          "Condition": "{% $states.input.Crawler.State = \"RUNNING\" %}"
+        }
+      ],
+      "Default": "Glue StartJobRun"
+    },
+    "Wait": {
+      "Type": "Wait",
+      "Seconds": 5,
+      "Next": "GetCrawler"
+    },
+    "Glue StartJobRun": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Arguments": {
+        "JobName": "flight_data_ingestion"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "Next": "glue_job_status"
+        }
+      ],
+      "Next": "glue_job_status"
+    },
+    "glue_job_status": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Next": "Passed_SNS Publish",
+          "Condition": "{% $states.input.JobRunState = \"SUCCEEDED\" %}"
+        }
+      ],
+      "Default": "Failed_SNS Publish"
+    },
+    "Passed_SNS Publish": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Arguments": {
+        "TopicArn": "arn:aws:sns:us-east-1:784230180132:airline_SNS",
+        "Message": {
+          "message": "Glue job rub successful"
+        }
+      },
+      "End": true
+    },
+    "Failed_SNS Publish": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Arguments": {
+        "TopicArn": "arn:aws:sns:us-east-1:784230180132:airline_SNS",
+        "Message": {
+          "message": "Glue job failed"
+        }
+      },
+      "End": true
+    }
+  },
+  "QueryLanguage": "JSONata"
+}
